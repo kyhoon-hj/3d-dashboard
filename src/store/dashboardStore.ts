@@ -72,6 +72,7 @@ class DashboardStore {
   ];
 
   selectedNodeId: string | null = "node-robot";
+  cameraFocusVersion = 0;
 
   metrics = {
     comfortScore: 96, // 쾌적도 %
@@ -122,6 +123,7 @@ class DashboardStore {
   // Actions
   selectNode(id: string | null) {
     this.selectedNodeId = id;
+    this.cameraFocusVersion += 1;
     if (id) {
       const node = this.nodes.find((n) => n.id === id);
       if (node) {
@@ -197,6 +199,124 @@ class DashboardStore {
 
       this.recalculateHomeComfort();
     }
+  }
+
+  handleVoiceCommand(transcript: string) {
+    const normalizedText = transcript.replace(/\s/g, "");
+
+    this.addLog(`음성 인식: "${transcript}"`, "info");
+
+    if (!normalizedText) {
+      this.addLog("음성 명령이 비어 있습니다. 다시 말씀해 주세요.", "warning");
+      return;
+    }
+
+    if (
+      normalizedText.includes("인사") ||
+      normalizedText.includes("안녕") ||
+      normalizedText.includes("반가")
+    ) {
+      this.triggerRobotGesture("Wave", "음성 명령: 인사 동작을 실행합니다.");
+      return;
+    }
+
+    if (
+      normalizedText.includes("엄지") ||
+      normalizedText.includes("칭찬") ||
+      normalizedText.includes("대단") ||
+      normalizedText.includes("나어때")
+    ) {
+      this.triggerRobotGesture("ThumbsUp", "음성 명령: 엄지척 동작을 실행합니다.");
+      return;
+    }
+
+    if (normalizedText.includes("끄덕") || normalizedText.includes("그렇") || normalizedText.includes("맞아")) {
+      this.triggerRobotGesture("Yes", "음성 명령: 끄덕임 동작을 실행합니다.");
+      return;
+    }
+
+    if (normalizedText.includes("도리") || normalizedText.includes("아니")) {
+      this.triggerRobotGesture("No", "음성 명령: 도리도리 동작을 실행합니다.");
+      return;
+    }
+
+    if (normalizedText.includes("점프")) {
+      this.triggerRobotGesture("Jump", "음성 명령: 점프 동작을 실행합니다.");
+      return;
+    }
+
+    if (normalizedText.includes("춤") || normalizedText.includes("댄스")) {
+      this.triggerRobotGesture("Dance", "음성 명령: 댄스 동작을 실행합니다.");
+      return;
+    }
+
+    if (normalizedText.includes("멈춰") || normalizedText.includes("정지")) {
+      this.triggerRobotGesture("Idle", "음성 명령: 기본 대기 상태로 전환합니다.");
+      return;
+    }
+
+    if (normalizedText.includes("초기화") || normalizedText.includes("리셋")) {
+      this.resetView();
+      return;
+    }
+
+    if (normalizedText.includes("살구")) {
+      this.setThemeColor("apricot");
+      return;
+    }
+
+    if (normalizedText.includes("세이지") || normalizedText.includes("초록")) {
+      this.setThemeColor("sage");
+      return;
+    }
+
+    if (normalizedText.includes("라벤더") || normalizedText.includes("보라")) {
+      this.setThemeColor("lavender");
+      return;
+    }
+
+    const deviceCommand = [
+      { keywords: ["조명", "스탠드"], id: "node-living-lamp" },
+      { keywords: ["청소기", "청소"], id: "node-vacuum" },
+      { keywords: ["커피", "에스프레소", "커피머신"], id: "node-coffee" },
+      { keywords: ["공기청정기", "공기청정", "청정기", "공기"], id: "node-purifier" },
+      { keywords: ["비서", "로봇", "로보"], id: "node-robot" },
+    ].find((command) => command.keywords.some((keyword) => normalizedText.includes(keyword)));
+
+    if (deviceCommand) {
+      if (normalizedText.includes("켜") || normalizedText.includes("꺼") || normalizedText.includes("전원")) {
+        if (deviceCommand.id === "node-robot") {
+          this.triggerRobotGesture("No", "음성 명령: 비서 로봇 전원 제어는 지원하지 않습니다.");
+          return;
+        }
+
+        this.toggleNodeStatus(deviceCommand.id);
+        return;
+      }
+
+      this.selectNode(deviceCommand.id);
+      return;
+    }
+
+    const looksLikeQuestion =
+      transcript.includes("?") ||
+      ["뭐", "무엇", "어때", "어디", "왜", "언제", "누구", "인가", "나요", "까요", "습니까", "니"].some(
+        (keyword) => normalizedText.includes(keyword)
+      );
+
+    if (looksLikeQuestion) {
+      const gesture = Math.random() > 0.5 ? "Yes" : "No";
+      this.triggerRobotGesture(
+        gesture,
+        gesture === "Yes"
+          ? "음성 질문: RoBo가 끄덕끄덕으로 대답합니다."
+          : "음성 질문: RoBo가 도리도리로 대답합니다."
+      );
+      return;
+    }
+
+    this.addLog(`이해하지 못한 음성 명령: "${transcript}"`, "warning");
+    this.triggerRobotGesture("No", "RoBo가 음성 명령을 이해하지 못해 고개를 젓습니다.");
   }
 
   // Animation controller

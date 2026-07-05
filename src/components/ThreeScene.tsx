@@ -1,11 +1,111 @@
 "use client";
 
 import React, { useRef, useMemo, useEffect, Suspense } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, type ThreeEvent } from "@react-three/fiber";
 import { OrbitControls, Line, Html, useGLTF, useAnimations } from "@react-three/drei";
 import { observer } from "mobx-react-lite";
 import * as THREE from "three";
+import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
+import type { HomeDevice } from "../store/dashboardStore";
 import { dashboardStore } from "../store/dashboardStore";
+import { playTts, playTtsAfterUserGesture } from "../lib/ttsClient";
+
+const robotSpeechByAnimation: Partial<Record<string, string>> = {
+  Wave: "안녕하세요. HJ솔루션입니다",
+  ThumbsUp: "정말 대단해요",
+  Yes: "그렇군요",
+  No: "그건 아닙니다.",
+};
+
+let danceAudioContext: AudioContext | null = null;
+let danceMusicTimer: number | null = null;
+let isDanceMusicPlaying = false;
+
+function playTone(
+  audioContext: AudioContext,
+  startTime: number,
+  frequency: number,
+  duration: number,
+  type: OscillatorType,
+  volume: number
+) {
+  const oscillator = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(frequency, startTime);
+  gain.gain.setValueAtTime(0.0001, startTime);
+  gain.gain.exponentialRampToValueAtTime(volume, startTime + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+
+  oscillator.connect(gain);
+  gain.connect(audioContext.destination);
+  oscillator.start(startTime);
+  oscillator.stop(startTime + duration + 0.02);
+}
+
+function scheduleDanceMusicLoop(audioContext: AudioContext) {
+  if (!isDanceMusicPlaying) return;
+
+  const startTime = audioContext.currentTime + 0.04;
+  const beat = 0.18;
+  const melody = [523.25, 659.25, 783.99, 659.25, 587.33, 739.99, 880, 739.99];
+
+  melody.forEach((frequency, index) => {
+    const noteStart = startTime + index * beat;
+    playTone(audioContext, noteStart, frequency, beat * 0.75, "square", 0.045);
+
+    if (index % 2 === 0) {
+      playTone(audioContext, noteStart, 130.81, beat * 0.55, "sine", 0.08);
+    }
+
+    playTone(audioContext, noteStart + beat * 0.5, 1760, beat * 0.18, "triangle", 0.025);
+  });
+
+  danceMusicTimer = window.setTimeout(() => {
+    scheduleDanceMusicLoop(audioContext);
+  }, melody.length * beat * 1000);
+}
+
+function stopDanceMusic() {
+  isDanceMusicPlaying = false;
+
+  if (danceMusicTimer !== null) {
+    window.clearTimeout(danceMusicTimer);
+    danceMusicTimer = null;
+  }
+}
+
+function startDanceMusic() {
+  if (typeof window === "undefined" || isDanceMusicPlaying) return;
+
+  const AudioContextConstructor =
+    window.AudioContext ||
+    (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+
+  if (!AudioContextConstructor) return;
+
+  danceAudioContext = danceAudioContext || new AudioContextConstructor();
+  isDanceMusicPlaying = true;
+
+  void danceAudioContext.resume().then(() => {
+    scheduleDanceMusicLoop(danceAudioContext!);
+  }).catch((error) => {
+    stopDanceMusic();
+    console.error("Dance music playback failed:", error);
+  });
+}
+
+function playRobotSpeech(text: string) {
+  void playTts(text).catch((error) => {
+    if (error instanceof DOMException && error.name === "NotAllowedError") {
+      playTtsAfterUserGesture(text);
+      return;
+    }
+
+    console.error("Robot animation TTS playback failed:", error);
+  });
+}
 
 // Cozy color palette helpers
 const getThemeColors = (theme: string) => {
@@ -52,6 +152,7 @@ const RobotModel = observer(() => {
   // Bind animations using useAnimations hook
   const { actions } = useAnimations(animations, groupRef);
   const prevActionName = useRef<string | null>(null);
+  const animationName = dashboardStore.robotAnimation;
 
   // Traverses meshes to enable shadows
   useEffect(() => {
@@ -65,7 +166,6 @@ const RobotModel = observer(() => {
 
   // Handle animation play and transition cross-fades
   useEffect(() => {
-    const animationName = dashboardStore.robotAnimation;
     const currentAction = actions[animationName];
     if (!currentAction) return;
 
@@ -79,6 +179,11 @@ const RobotModel = observer(() => {
 
     currentAction.reset().fadeIn(0.25).play();
 
+    const speechText = robotSpeechByAnimation[animationName];
+    if (speechText && prevActionName.current !== animationName) {
+      playRobotSpeech(speechText);
+    }
+
     if (prevActionName.current && prevActionName.current !== animationName) {
       const prevAction = actions[prevActionName.current];
       if (prevAction) {
@@ -87,7 +192,21 @@ const RobotModel = observer(() => {
     }
 
     prevActionName.current = animationName;
-  }, [dashboardStore.robotAnimation, actions]);
+  }, [animationName, actions]);
+
+  useEffect(() => {
+    if (animationName === "Dance") {
+      startDanceMusic();
+    } else {
+      stopDanceMusic();
+    }
+
+    return () => {
+      if (animationName === "Dance") {
+        stopDanceMusic();
+      }
+    };
+  }, [animationName]);
 
   useFrame(() => {
     if (groupRef.current) {
@@ -214,7 +333,7 @@ const DeviceMesh = ({ type, color, status }: DeviceMeshProps) => {
 
 // Smart device mesh placement
 interface SmartDeviceProps {
-  device: any;
+  device: HomeDevice;
   themeColor: string;
 }
 
@@ -233,7 +352,7 @@ const SmartDevice = observer(({ device, themeColor }: SmartDeviceProps) => {
     }
   });
 
-  const handleClick = (e: any) => {
+  const handleClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     dashboardStore.selectNode(device.id);
   };
@@ -303,13 +422,16 @@ const SmartDevice = observer(({ device, themeColor }: SmartDeviceProps) => {
 
 // Camera and target manager
 const ControlAndCameraManager = observer(() => {
-  const controlsRef = useRef<any>(null);
+  const controlsRef = useRef<OrbitControlsImpl>(null);
   const [transitioning, setTransitioning] = React.useState(false);
   const lastSelectedNodeId = useRef<string | null>(null);
+  const selectedNodeId = dashboardStore.selectedNodeId;
+  const cameraFocusVersion = dashboardStore.cameraFocusVersion;
+  const nodes = dashboardStore.nodes;
   
   const selectedNode = useMemo(() => {
-    return dashboardStore.nodes.find((n) => n.id === dashboardStore.selectedNodeId) || null;
-  }, [dashboardStore.selectedNodeId, dashboardStore.nodes]);
+    return nodes.find((n) => n.id === selectedNodeId) || null;
+  }, [nodes, selectedNodeId]);
 
   const targetLookAt = useMemo(() => new THREE.Vector3(0, 0, 0), []);
   const targetCamPos = useMemo(() => new THREE.Vector3(0, 3.2, 5.5), []);
@@ -332,13 +454,16 @@ const ControlAndCameraManager = observer(() => {
     }
   }, [selectedNode, targetLookAt, targetCamPos]);
 
-  // Trigger camera transition ONLY when the selected node updates
+  // Trigger camera transition when a node is selected or explicitly focused again
   useEffect(() => {
-    if (dashboardStore.selectedNodeId !== lastSelectedNodeId.current) {
+    if (
+      selectedNodeId !== lastSelectedNodeId.current ||
+      cameraFocusVersion > 0
+    ) {
       setTransitioning(true);
-      lastSelectedNodeId.current = dashboardStore.selectedNodeId;
+      lastSelectedNodeId.current = selectedNodeId;
     }
-  }, [dashboardStore.selectedNodeId]);
+  }, [cameraFocusVersion, selectedNodeId]);
 
   useFrame((state) => {
     if (controlsRef.current) {

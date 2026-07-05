@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { observer } from "mobx-react-lite";
-import { 
+import {
   Lightbulb, 
   Coffee, 
   Wind, 
@@ -18,11 +18,14 @@ import {
   RotateCcw,
   Sliders,
   Sparkles,
+  Mic,
   Music,
   Tv,
   HelpCircle
 } from "lucide-react";
 import { dashboardStore } from "../store/dashboardStore";
+import { listenWithBrowserSpeech, recordAndTranscribe } from "../lib/sttClient";
+import { playTts, playTtsAfterUserGesture } from "../lib/ttsClient";
 
 // Dynamically import ThreeScene to avoid SSR errors
 const ThreeScene = dynamic(() => import("./ThreeScene"), {
@@ -50,6 +53,48 @@ const getThemeColors = (theme: string) => {
 
 const Dashboard = observer(() => {
   const logContainerRef = useRef<HTMLDivElement>(null);
+  const [viewport, setViewport] = useState({ width: 1280, height: 720 });
+  const [isListening, setIsListening] = useState(false);
+  const [isBrowserListening, setIsBrowserListening] = useState(false);
+
+  useEffect(() => {
+    const updateViewport = () => {
+      setViewport({
+        width: window.innerWidth,
+        height: window.innerHeight,
+      });
+    };
+
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+
+    return () => {
+      window.removeEventListener("resize", updateViewport);
+    };
+  }, []);
+
+  const dashboardScale = useMemo(() => {
+    const baseWidth = 1280;
+    const baseHeight = 720;
+
+    return Math.min(1, viewport.width / baseWidth, viewport.height / baseHeight);
+  }, [viewport.height, viewport.width]);
+
+  const scaledDashboardStyle = useMemo<React.CSSProperties>(() => {
+    if (dashboardScale >= 1) {
+      return {
+        height: "100%",
+        width: "100%",
+      };
+    }
+
+    return {
+      height: `${viewport.height / dashboardScale}px`,
+      transform: `scale(${dashboardScale})`,
+      transformOrigin: "top left",
+      width: `${viewport.width / dashboardScale}px`,
+    };
+  }, [dashboardScale, viewport.height, viewport.width]);
 
   // Auto-scroll logs to top on update
   useEffect(() => {
@@ -61,6 +106,25 @@ const Dashboard = observer(() => {
   const selectedNode = dashboardStore.nodes.find(
     (n) => n.id === dashboardStore.selectedNodeId
   );
+  const selectionSpeechText =
+    selectedNode?.type === "lighting"
+      ? "조명이 켜졌습니다"
+      : selectedNode?.type === "coffee"
+        ? "커피가 준배되었습니다"
+        : null;
+
+  useEffect(() => {
+    if (!selectionSpeechText) return;
+
+    void playTts(selectionSpeechText).catch((error) => {
+      if (error instanceof DOMException && error.name === "NotAllowedError") {
+        playTtsAfterUserGesture(selectionSpeechText);
+        return;
+      }
+
+      console.error("Selection TTS playback failed:", error);
+    });
+  }, [selectedNode?.id, selectionSpeechText]);
 
   // Theme styling helpers based on active MobX theme
   const getThemeTextClass = () => {
@@ -155,18 +219,56 @@ const Dashboard = observer(() => {
     }
   };
 
+  const handleVoiceCommand = async () => {
+    if (isListening) return;
+
+    setIsListening(true);
+    dashboardStore.addLog("음성 명령을 듣고 있습니다. 3초 안에 말씀해 주세요.", "info");
+
+    try {
+      const transcript = await recordAndTranscribe(3500);
+      dashboardStore.handleVoiceCommand(transcript);
+    } catch (error) {
+      console.error("Voice command failed:", error);
+      dashboardStore.addLog("음성 인식에 실패했습니다. 마이크 권한과 네트워크 상태를 확인해 주세요.", "error");
+      dashboardStore.triggerRobotGesture("No", "RoBo가 음성 인식 실패를 감지했습니다.");
+    } finally {
+      setIsListening(false);
+    }
+  };
+
+  const handleBrowserVoiceCommand = async () => {
+    if (isBrowserListening) return;
+
+    setIsBrowserListening(true);
+    dashboardStore.addLog("브라우저 무료 음성 인식을 시작합니다. 말씀해 주세요.", "info");
+
+    try {
+      const transcript = await listenWithBrowserSpeech(4500);
+      dashboardStore.handleVoiceCommand(transcript);
+    } catch (error) {
+      console.error("Browser voice command failed:", error);
+      dashboardStore.addLog("브라우저 음성 인식에 실패했습니다. Chrome/Edge와 마이크 권한을 확인해 주세요.", "error");
+      dashboardStore.triggerRobotGesture("No", "RoBo가 브라우저 음성 인식 실패를 감지했습니다.");
+    } finally {
+      setIsBrowserListening(false);
+    }
+  };
+
   return (
-    <div className="relative flex flex-col w-screen h-screen overflow-hidden bg-cozy-bg text-cozy-text font-sans cozy-dots select-none">
+    <div className="w-screen h-screen overflow-hidden bg-cozy-bg cozy-dots">
+      <div style={scaledDashboardStyle}>
+        <div className="relative flex flex-col w-full h-full overflow-hidden text-cozy-text font-sans select-none">
       
       {/* Soft Header */}
-      <header className="relative z-10 flex flex-col md:flex-row items-center justify-between px-6 py-4 border-b border-cozy-border cozy-panel rounded-b-2xl">
+      <header className="relative z-10 flex flex-row items-center justify-between px-6 py-4 border-b border-cozy-border cozy-panel rounded-b-2xl">
         <div className="flex items-center gap-3">
           <div className="p-2.5 bg-white/60 rounded-2xl border border-white/80 shadow-xs">
             <span className="text-2xl">🤖</span>
           </div>
           <div>
             <h1 className="text-lg font-black tracking-wide text-cozy-text flex items-center gap-1.5">
-              비서 로봇 RoBo & 스마트홈 <span className={`text-xs px-2 py-0.5 rounded-full bg-white border border-cozy-border ${getThemeTextClass()}`}>Cozy HUD v1.3</span>
+              비서 로봇 RoBo & 스마트홈 <span className={`text-xs px-2 py-0.5 rounded-full bg-white border border-cozy-border ${getThemeTextClass()}`}>HJ Solution HUB v1.3</span>
             </h1>
             <p className="text-[10px] text-cozy-text-light font-bold tracking-wider uppercase font-mono">
               Warm & Cozy Interactive Robot Dashboard
@@ -175,7 +277,7 @@ const Dashboard = observer(() => {
         </div>
 
         {/* Global Statistics Panel */}
-        <div className="flex items-center gap-4 mt-3 md:mt-0">
+        <div className="flex items-center gap-4">
           
           {/* Comfort Gauge */}
           <div className="flex items-center gap-2.5 px-4 py-1.5 bg-cozy-card rounded-2xl border border-white/65 shadow-xs">
@@ -232,10 +334,10 @@ const Dashboard = observer(() => {
       </header>
 
       {/* Main Board Viewport */}
-      <main className="relative flex flex-1 flex-col lg:flex-row w-full overflow-hidden">
+      <main className="relative flex flex-1 flex-row w-full overflow-hidden">
         
         {/* Left Control Panel */}
-        <section className="relative z-10 w-full lg:w-[360px] border-b lg:border-b-0 lg:border-r border-cozy-border cozy-panel flex flex-col overflow-y-auto max-h-[38vh] lg:max-h-full">
+        <section className="relative z-10 w-[360px] shrink-0 border-r border-cozy-border cozy-panel flex flex-col overflow-y-auto max-h-full">
           
           {/* Subsection 1: Environment indicators */}
           <div className="p-5 border-b border-white/30">
@@ -363,7 +465,7 @@ const Dashboard = observer(() => {
         </section>
 
         {/* Center Section: WebGL 3D Canvas */}
-        <section className="relative flex-1 h-full min-h-[40vh] lg:min-h-0 bg-cozy-bg border-y lg:border-y-0 border-cozy-border">
+        <section className="relative flex-1 h-full min-h-0 bg-cozy-bg border-cozy-border">
           <ThreeScene />
 
           {/* Quick manual hints */}
@@ -375,7 +477,7 @@ const Dashboard = observer(() => {
         </section>
 
         {/* Right Panel: Smart home inspector & Robot motion controls */}
-        <section className="relative z-10 w-full lg:w-[320px] border-t lg:border-t-0 lg:border-l border-cozy-border cozy-panel flex flex-col overflow-y-auto max-h-[38vh] lg:max-h-full">
+        <section className="relative z-10 w-[320px] shrink-0 border-l border-cozy-border cozy-panel flex flex-col overflow-y-auto max-h-full">
           
           {/* Subsection 1: Inspector Info Cards */}
           <div className="p-5 border-b border-white/20 flex-1">
@@ -410,6 +512,13 @@ const Dashboard = observer(() => {
                     </div>
                   </div>
                 </div>
+
+                {selectedNode.type === "lighting" && (
+                  <div className="p-3 border border-amber-200 bg-amber-50/80 rounded-xl text-xs font-bold text-amber-800 flex items-center gap-2 shadow-xs">
+                    <Lightbulb size={14} className="text-amber-500 fill-amber-200 shrink-0" />
+                    <span>조명이 켜졌습니다</span>
+                  </div>
+                )}
 
                 {/* Description */}
                 <div>
@@ -573,7 +682,35 @@ const Dashboard = observer(() => {
           <h2 className="text-[10px] font-black tracking-wider text-cozy-text flex items-center gap-1.5 uppercase font-mono">
             🤖 HOME SYSTEM ACTIVITY LOGGER
           </h2>
-          <span className="text-[9px] font-bold text-cozy-text-light">버퍼 보존: 최근 30개 이력</span>
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] font-bold text-cozy-text-light">버퍼 보존: 최근 30개 이력</span>
+            <button
+              onClick={handleVoiceCommand}
+              disabled={isListening}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] font-bold transition-all shadow-xs ${
+                isListening
+                  ? "border-rose-200 bg-rose-50 text-rose-600 cursor-wait animate-pulse"
+                  : "border-cozy-border bg-white text-cozy-text hover:bg-apricot-secondary cursor-pointer"
+              }`}
+              title="마이크로 음성 명령을 입력합니다."
+            >
+              <Mic size={12} />
+              {isListening ? "듣는 중..." : "Whisper"}
+            </button>
+            <button
+              onClick={handleBrowserVoiceCommand}
+              disabled={isBrowserListening}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[10px] font-bold transition-all shadow-xs ${
+                isBrowserListening
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700 cursor-wait animate-pulse"
+                  : "border-cozy-border bg-white text-cozy-text hover:bg-emerald-50 cursor-pointer"
+              }`}
+              title="브라우저 내장 무료 음성 인식으로 명령을 입력합니다."
+            >
+              <Mic size={12} />
+              {isBrowserListening ? "듣는 중..." : "무료 음성"}
+            </button>
+          </div>
         </div>
 
         {/* Console view */}
@@ -608,6 +745,8 @@ const Dashboard = observer(() => {
           })}
         </div>
       </footer>
+        </div>
+      </div>
     </div>
   );
 });
