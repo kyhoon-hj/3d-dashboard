@@ -1,3 +1,5 @@
+import { publicPath } from "./publicPath";
+
 const audioCache = new Map<string, string>();
 let currentAudio: HTMLAudioElement | null = null;
 
@@ -10,7 +12,7 @@ export async function playTts(text: string) {
   let audioUrl = audioCache.get(normalizedText);
 
   if (!audioUrl) {
-    const response = await fetch("/api/tts", {
+    const response = await fetch(publicPath("/api/tts"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

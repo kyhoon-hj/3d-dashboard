@@ -1,3 +1,5 @@
+import { publicPath } from "./publicPath";
+
 type SttResponse = {
   text?: string;
 };
@@ -87,7 +89,7 @@ export async function recordAndTranscribe(durationMs = 3500) {
   const body = new FormData();
   body.append("audio", audioBlob, `voice-command.${getFileExtension(audioBlob.type)}`);
 
-  const response = await fetch("/api/stt", {
+  const response = await fetch(publicPath("/api/stt"), {
     method: "POST",
     body,
   });

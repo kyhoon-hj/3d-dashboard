@@ -9,6 +9,7 @@ import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { HomeDevice } from "../store/dashboardStore";
 import { dashboardStore } from "../store/dashboardStore";
 import { playTts, playTtsAfterUserGesture } from "../lib/ttsClient";
+import { publicPath } from "../lib/publicPath";
 
 const robotSpeechByAnimation: Partial<Record<string, string>> = {
   Wave: "안녕하세요. HJ솔루션입니다",
@@ -147,7 +148,7 @@ const RobotModel = observer(() => {
   const groupRef = useRef<THREE.Group>(null);
   
   // Load the RobotExpressive model from public folder
-  const { scene, animations } = useGLTF("/models/robot.glb");
+  const { scene, animations } = useGLTF(publicPath("/models/robot.glb"));
   
   // Bind animations using useAnimations hook
   const { actions } = useAnimations(animations, groupRef);
