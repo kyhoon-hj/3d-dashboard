@@ -20,7 +20,7 @@ const robotSpeechByAnimation: Partial<Record<string, string>> = {
 let danceAudioContext: AudioContext | null = null;
 let danceMusicTimer: number | null = null;
 let isDanceMusicPlaying = false;
-const dashboardProxyPath = "/dashboard";
+const dashboardProxyPath = process.env.NEXT_PUBLIC_DASHBOARD_BASE_PATH || "/dashboard";
 
 function getRobotModelUrl() {
   const modelPath = "/models/robot.glb";
@@ -29,9 +29,14 @@ function getRobotModelUrl() {
     return modelPath;
   }
 
-  const currentPath = window.location.pathname;
-  const isDashboardProxy =
-    currentPath === dashboardProxyPath || currentPath.startsWith(`${dashboardProxyPath}/`);
+  const paths = [
+    window.location.pathname,
+    new URL(document.baseURI).pathname,
+    document.referrer ? new URL(document.referrer).pathname : "",
+  ];
+  const isDashboardProxy = paths.some(
+    (path) => path === dashboardProxyPath || path.startsWith(`${dashboardProxyPath}/`)
+  );
 
   return isDashboardProxy ? `${dashboardProxyPath}${modelPath}` : modelPath;
 }
