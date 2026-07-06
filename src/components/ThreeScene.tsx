@@ -9,7 +9,6 @@ import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { HomeDevice } from "../store/dashboardStore";
 import { dashboardStore } from "../store/dashboardStore";
 import { playTts, playTtsAfterUserGesture } from "../lib/ttsClient";
-import { publicPath } from "../lib/publicPath";
 
 const robotSpeechByAnimation: Partial<Record<string, string>> = {
   Wave: "안녕하세요. HJ솔루션입니다",
@@ -21,6 +20,21 @@ const robotSpeechByAnimation: Partial<Record<string, string>> = {
 let danceAudioContext: AudioContext | null = null;
 let danceMusicTimer: number | null = null;
 let isDanceMusicPlaying = false;
+const dashboardProxyPath = "/dashboard";
+
+function getRobotModelUrl() {
+  const modelPath = "/models/robot.glb";
+
+  if (typeof window === "undefined") {
+    return modelPath;
+  }
+
+  const currentPath = window.location.pathname;
+  const isDashboardProxy =
+    currentPath === dashboardProxyPath || currentPath.startsWith(`${dashboardProxyPath}/`);
+
+  return isDashboardProxy ? `${dashboardProxyPath}${modelPath}` : modelPath;
+}
 
 function playTone(
   audioContext: AudioContext,
@@ -146,9 +160,14 @@ const CanvasLoader = () => (
 // 3D Humanoid Robot Character
 const RobotModel = observer(() => {
   const groupRef = useRef<THREE.Group>(null);
+  const robotModelUrl = useMemo(() => getRobotModelUrl(), []);
+
+  useEffect(() => {
+    console.info("Loading robot model:", robotModelUrl);
+  }, [robotModelUrl]);
   
   // Load the RobotExpressive model from public folder
-  const { scene, animations } = useGLTF(publicPath("/models/robot.glb"));
+  const { scene, animations } = useGLTF(robotModelUrl);
   
   // Bind animations using useAnimations hook
   const { actions } = useAnimations(animations, groupRef);
@@ -510,7 +529,7 @@ const ThreeScene = observer(() => {
   return (
     <div className="relative w-full h-full select-none">
       <Canvas
-        shadows
+        shadows={{ type: THREE.PCFShadowMap }}
         camera={{ position: [0, 3.2, 5.5], fov: 45 }}
         className="w-full h-full"
       >
